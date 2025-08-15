@@ -1,0 +1,10 @@
+{
+  "id": "composite-uniqueness-config",
+  "name": "Composite Uniqueness Config",
+  "description": "Select fields that must be unique in combination",
+  "icon": "fingerprint",
+  "type": "interface",
+  "group": "standard",
+  "types": ["json"]
+}
+

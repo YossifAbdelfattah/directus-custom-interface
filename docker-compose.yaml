@@ -1,0 +1,19 @@
+services:
+  directus:
+    image: ghcr.io/directus/directus:9.26.0
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+    ports:
+      - 8055:8055   
+    environment:
+      KEY: '255d861b-5ea1-5996-9aa3-922530ec40b1'
+      SECRET: '6116487b-cda1-52c2-b5b5-c8022c45e263'
+      ADMIN_EMAIL: "foo@bar.de"
+      ADMIN_PASSWORD: "foobar"  
+      EXTENSIONS_AUTO_RELOAD: true
+    volumes:
+      - ./extensions:/directus/extensions     
+      - ./database:/directus/database
+      - ./uploads:/directus/uploads  
