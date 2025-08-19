@@ -1,118 +1,97 @@
-export default async function registerHook({ filter, action }, { services, database, getSchema }) {
-  const { ItemsService } = services;
+export default function registerHook({ filter }, { services }) {
+  const { ItemsService, CollectionsService, FieldsService } = services;
 
-  const loadRules = async () => {
-    const schema = await getSchema({ database });
-    const rulesService = new ItemsService('uniqueness_rules', {
-      knex: database,
-      schema,
-      accountability: null,
-    });
+  // Normalize meta.composite_uniqueness_config to string[][]
+  async function getCompositeGroups(collection, schema, knex) {
+    const collectionsService = new CollectionsService({ schema, knex, accountability: null });
+    const current = await collectionsService.readOne(collection, { fields: ['meta'] });
+    const raw = current?.meta?.composite_uniqueness_config ?? null;
+    let groups = [];
 
-    const rows = await rulesService.readByQuery(
-      { fields: ['collection', 'rules'], limit: -1 },
-      { emitEvents: false } // avoid re-triggering hooks
-    );
-
-    const map = new Map(); // collection -> string[] of fields
-    for (const r of rows ?? []) {
-      // r.rules is JSON; ensure array of field names
-      const fields = Array.isArray(r.rules) ? r.rules : [];
-      map.set(r.collection, fields);
+    if (Array.isArray(raw)) {
+      if (raw.every(Array.isArray)) {
+        groups = raw;
+      } else {
+        // legacy: flat array means one group
+        groups = [raw];
+      }
+    } else if (raw && typeof raw === 'object' && Array.isArray(raw.groups)) {
+      groups = raw.groups;
     }
-    console.log('-----------------------------------------------')
-    console.log(map);
-    console.log('-----------------------------------------------')
+    // sanitize: keep only non-empty string fields, dedupe within each group, drop empty groups
+    groups = groups
+      .map((g) => {
+        const seen = new Set();
+        const cleaned = [];
+        for (const f of Array.isArray(g) ? g : []) {
+          if (typeof f === 'string') {
+            const s = f.trim();
+            if (s && !seen.has(s)) {
+              seen.add(s);
+              cleaned.push(s);
+            }
+          }
+        }
+        return cleaned;
+      })
+      .filter((g) => g.length > 0);
+    return groups.length > 0 ? groups : null;
+  }
 
-    return map;
-  };
+  function formatErrorMessage(group, collection, existingId) {
+    return `Unique constraint failed for group [${group.join(', ')}] in "${collection}". Conflicts with item id '${existingId}'.`;
+  }
 
-  let rulesMap = await loadRules();
+  filter('items.create', async (input, meta, { database, schema, accountability }) => {
+    const collection = meta.collection;
+    const groups = await getCompositeGroups(collection, schema, database);
+    if (!groups) return input;
 
-  // Refresh rules whenever they change
-  const refresh = async () => { rulesMap = await loadRules(); };
-
-  action('uniqueness_rules.items.create', refresh);
-  action('uniqueness_rules.items.update', refresh);
-  action('uniqueness_rules.items.delete', refresh);
-
-  // ---- Shared validators ----
-  const ensureUniqueOnCreate = async (collectionName, input, ctx) => {
-    const fields = rulesMap.get(collectionName);
-    if (!fields || fields.length === 0) return;
-
-    const itemsService = new services.ItemsService(collectionName, {
-      knex: ctx.database,
-      schema: ctx.schema,
-      accountability: ctx.accountability,
-    });
-
-    const itemValue = {};
-    for (const f of fields) {
-      const v = Object.prototype.hasOwnProperty.call(input, f) ? input[f] : '';
-      itemValue[f] = v;
+    const itemsService = new ItemsService(collection, { schema, knex: database, accountability });
+    const fieldsService = new FieldsService({ schema, knex: database, accountability });
+    for (const group of groups) {
+      const filterObj = {};
+      for (const field of group) {
+        const value = input[field];
+        const defaultField = await fieldsService.readOne(collection, field).then((field) => field.schema.default_value);
+        const finalValue = value ?? defaultField;
+        filterObj[field] = finalValue === null ? { _null: true } : { _eq: finalValue };
+      }
+      const existing = await itemsService.readByQuery({ filter: filterObj, limit: 1 });
+      if (existing.length > 0) {
+        throw new Error(formatErrorMessage(group, collection, existing[0].id));
+      }
     }
 
-    const filterObj = {};
-    for (const f of fields) {
-      filterObj[f] = itemValue[f] === null ? { _null: true } : { _eq: itemValue[f] };
-    }
-
-    const existing = await itemsService.readByQuery({ filter: filterObj, limit: 1 }, { emitEvents: false });
-    if (existing.length > 0) {
-      throw new Error(`The combination of ${fields.join(', ')} already exists in ${collectionName}.`);
-    }
-  };
-
-  const ensureUniqueOnUpdate = async (collectionName, input, keys, ctx) => {
-    const fields = rulesMap.get(collectionName);
-    console.log('-----------------------------------------------')
-    console.log(fields);
-    console.log('-----------------------------------------------')
-
-    if (!fields || fields.length === 0) return;
-
-    // If none of the watched fields are in the patch, skip
-    if (!fields.some((f) => Object.prototype.hasOwnProperty.call(input, f))) return;
-
-    const itemsService = new services.ItemsService(collectionName, {
-      knex: ctx.database,
-      schema: ctx.schema,
-      accountability: ctx.accountability,
-    });
-
-    // Get current values for fields not present in the patch
-    const current = await itemsService.readOne(keys[0], { fields }, { emitEvents: false });
-    console.log('-----------------------------------------------')
-    console.log(current);
-    console.log('-----------------------------------------------')
-
-    const filterObj = {};
-    for (const f of fields) {
-      const value = Object.prototype.hasOwnProperty.call(input, f) ? input[f] : current[f];
-      filterObj[f] = value === null ? { _null: true } : { _eq: value };
-    }
-    console.log('-----------------------------------------------')
-    console.log(filterObj);
-    console.log('-----------------------------------------------')
-
-    const existing = await itemsService.readByQuery({ filter: filterObj, limit: 1 }, { emitEvents: false });
-    console.log('-----------------------------------------------')
-    console.log(existing)
-    console.log('-----------------------------------------------')
-    if (existing.length > 0) {
-      throw new Error(`The combination of ${fields.join(', ')} already exists in ${collectionName}.`);
-    }
-  };
-
-  // ---- Single global hooks (apply to every collection) ----
-  filter('items.create', async (input, meta, ctx) => {
-    await ensureUniqueOnCreate(meta.collection, input, ctx);
     return input;
   });
 
-  filter('items.update', async (input, meta, ctx) => {
-    await ensureUniqueOnUpdate(meta.collection, input, meta.keys, ctx);
+  filter('items.update', async (input, { collection, keys }, { database, schema, accountability }) => {
+    const groups = await getCompositeGroups(collection, schema, database);
+    if (!groups) return input;
+
+    const itemsService = new ItemsService(collection, { schema, knex: database, accountability });
+
+    // Fetch current values needed for all fields in all groups
+    const fieldsNeeded = [...new Set(groups.flat())];
+    const current = await itemsService.readOne(keys[0], { fields: fieldsNeeded });
+    for (const group of groups) {
+      const filterObj = {};
+      for (const field of group) {
+        const value = Object.prototype.hasOwnProperty.call(input, field) ? input[field] : current[field];
+        filterObj[field] = value === null ? { _null: true } : { _eq: value };
+      }
+
+      const existing = await itemsService.readByQuery({ filter: filterObj, limit: 1 });
+      
+      /** Check if the existing item is not the one being updated
+       *  keys[0] needs to be converted to a Number for proper comparison 
+       **/
+      if (existing.length > 0 && existing[0].id !== Number(keys[0])) {
+        throw new Error(formatErrorMessage(group, collection, existing[0].id));
+      }
+    }
+
     return input;
   });
 }

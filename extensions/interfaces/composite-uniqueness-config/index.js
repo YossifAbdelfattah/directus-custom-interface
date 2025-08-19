@@ -1,9 +1,9 @@
-import { inject, ref, computed, onMounted, getCurrentInstance, watchEffect, watch, resolveComponent, openBlock, createBlock } from 'vue';
-import { useStores, useCollection } from '@directus/extensions-sdk';
+import { inject, ref, computed, watch, resolveComponent, openBlock, createElementBlock, createElementVNode, Fragment, renderList, createVNode, withCtx, createTextVNode } from 'vue';
+import { useCollection } from '@directus/extensions-sdk';
 
 var e=[],t=[];function n(n,r){if(n&&"undefined"!=typeof document){var a,s=!0===r.prepend?"prepend":"append",d=!0===r.singleTag,i="string"==typeof r.container?document.querySelector(r.container):document.getElementsByTagName("head")[0];if(d){var u=e.indexOf(i);-1===u&&(u=e.push(i)-1,t[u]={}),a=t[u]&&t[u][s]?t[u][s]:t[u][s]=c();}else a=c();65279===n.charCodeAt(0)&&(n=n.substring(1)),a.styleSheet?a.styleSheet.cssText+=n:a.appendChild(document.createTextNode(n));}function c(){var e=document.createElement("style");if(e.setAttribute("type","text/css"),r.attributes)for(var t=Object.keys(r.attributes),n=0;n<t.length;n++)e.setAttribute(t[n],r.attributes[t[n]]);var a="prepend"===s?"afterbegin":"beforeend";return i.insertAdjacentElement(a,e),e}}
 
-var css = "\n.selected-list[data-v-cd59a7ea] {\n  margin-top: 1rem;\n  display: flex;\n  flex-wrap: wrap;\n  gap: 0.5rem;\n}\n";
+var css = "\n.selected-list[data-v-b66b7c0e] {\n  margin-top: 0rem;\n}\n.container[data-v-b66b7c0e] {\n  display: flex;\n  gap: 5rem;\n  margin-bottom: 1rem;\n}\n.add-button-container[data-v-b66b7c0e] {\n  margin-top: 0rem;\n}\n\n";
 n(css,{});
 
 var _export_sfc = (sfc, props) => {
@@ -14,104 +14,143 @@ var _export_sfc = (sfc, props) => {
   return target;
 };
 
+const _hoisted_1 = { class: "wrapper" };
+const _hoisted_2 = { class: "add-button-container" };
+
+
 const _sfc_main = {
   __name: 'module',
   props: {
-  // Directus passes this field value; on new items it's often null
-  value: { type: Array, default: null },
+  collectionField: { type: String, default: null },
+  collectionName: { type: String, default: null },
+  // Persisted value can be string[] (legacy) or string[][] (groups). We emit string[][].
+  value: { type: Array, default: () => [] },
+  record: { type: Object, default: () => ({}) },
+  collection: { type: String, default: null },
+  type: { type: String, default: null },
 },
-  emits: ['update:modelValue', 'input'],
+  emits: ['input'],
   setup(__props, { emit: __emit }) {
 
 const props = __props;
-console.log('----------------------------------------');
-console.log('Props:', props.value);
+
 const emit = __emit;
-
-// Current item values from Directus Item Editor
 const values = inject('values', ref({}));
-console.log('----------------------------------------');
-console.log('Current item values:', values.value);
-console.log('----------------------------------------');
 
-/**
- * Keep your local "selected", but wire it to the Directus form store.
- * - Getter normalizes null -> []
- * - Setter emits update:modelValue (and input for legacy)
- */
-const selected = computed({
-  get: () => (Array.isArray(props.value) ? props.value : []),
-  set: (v) => {
-    const arr = Array.isArray(v) ? v : [];
-    emit('update:modelValue', arr);
-    emit('input', arr); // optional legacy compatibility
+const chosenCollection = computed(() =>
+  values.value?.[props.collectionField] ||
+  props.collectionName ||
+  values.value?.collection ||
+  props.collection
+);
+
+const fields = ref([]); // ['title','status', ...]
+
+// --- hydrate groups from props.value ---
+function toGroups(val) {
+  if (Array.isArray(val) && val.every(Array.isArray)) {
+    return val.map((g) => g.slice()); // already string[][]
+  }
+  if (Array.isArray(val)) {
+    return [val.slice()]; // legacy string[]
+  }
+  return [[]];
+}
+
+const selects = ref(toGroups(props.value));
+if (selects.value.length === 0) selects.value.push([]);
+
+// --- emit groups verbatim (cleaned) ---
+watch(
+  selects,
+  (groups) => {
+    const cleaned = groups.map((g) =>
+      (Array.isArray(g) ? g : []).filter((x) => typeof x === 'string' && x.length > 0)
+    );
+    emit('input', cleaned);
   },
-});
-console.log('selected value:', selected.value);
-console.log('----------------------------------------');
-// On create, coerce null -> [] so "required" doesn't fail with null
-onMounted(() => {
-  if (props.value == null) selected.value = [];
-});
+  { deep: true, immediate: true }
+);
 
-// Determine the chosen collection name
-const chosenCollection = computed(() => {
-  const raw = values.value?.collection ?? '';
-  return typeof raw === 'string' ? raw.trim() : '';
-});
-onMounted(() => {
-  const p = getCurrentInstance()?.vnode?.props ?? {};
-  console.log('Has update listener:', !!p['onUpdate:modelValue']);
-  console.log('Has input listener: ', !!p.onInput);
-});
-// Validate against admin store to avoid "stores could not be found"
-const { useCollectionsStore } = useStores();
-const collectionsStore = useCollectionsStore();
+function addSelect() {
+  selects.value.push([]);
+}
+function removeSelect(index) {
+  console.log(index);
+  selects.value.splice(index, 1);
+  if (selects.value.length === 0) selects.value.push([]);
+}
 
-const validName = computed(() => {
-  const n = chosenCollection.value;
-  return n && collectionsStore.collections?.some(c => c.collection === n) ? n : null;
-});
-
-// Bind once; pass reactive ref (validName)
-const { fields: rawFields } = useCollection(validName);
-
-// Visible fields (exclude hidden)
-const fields = ref([]);
-
-watchEffect(() => {
-  if (!validName.value) {
-    fields.value = [];
-    return;
-  }
-  fields.value = (rawFields.value || []).filter(f => !f?.meta?.hidden);
-});
-
-// Clear selection when collection becomes invalid
-watch(validName, (n) => {
-  if (!n) {
-    selected.value = []; // clears v-select and writes [] to form state
-  }
-});
+// load visible (non-hidden) fields for the chosen collection
+watch(
+  chosenCollection,
+  async (name) => {
+    if (!name) return;
+    try {
+      const { fields: collectionFields } = useCollection(name);
+      fields.value = collectionFields.value
+        .filter((f) => !f?.meta?.hidden)
+        .map((f) => f.field);
+    } catch (err) {
+      console.error('Failed to load fields for collection', name, err);
+      fields.value = [];
+    }
+  },
+  { immediate: true }
+);
 
 return (_ctx, _cache) => {
-  const _component_v_select = resolveComponent("v-select");
+  const _component_VSelect = resolveComponent("VSelect");
+  const _component_VButton = resolveComponent("VButton");
 
-  return (openBlock(), createBlock(_component_v_select, {
-    modelValue: selected.value,
-    "onUpdate:modelValue": _cache[0] || (_cache[0] = $event => ((selected).value = $event)),
-    items: fields.value,
-    multiple: "",
-    label: "Rules",
-    "item-text": "field",
-    "item-value": "field",
-    class: "selected-list"
-  }, null, 8 /* PROPS */, ["modelValue", "items"]))
+  return (openBlock(), createElementBlock("div", null, [
+    createElementVNode("div", _hoisted_1, [
+      (openBlock(true), createElementBlock(Fragment, null, renderList(selects.value, (_model, i) => {
+        return (openBlock(), createElementBlock("div", {
+          key: i,
+          class: "container"
+        }, [
+          createVNode(_component_VSelect, {
+            modelValue: selects.value[i],
+            "onUpdate:modelValue": $event => ((selects.value[i]) = $event),
+            items: fields.value,
+            multiple: "",
+            multiplePreviewThreshold: 5,
+            class: "selected-list"
+          }, null, 8 /* PROPS */, ["modelValue", "onUpdate:modelValue", "items"]),
+          createVNode(_component_VButton, {
+            xLarge: "",
+            danger: "",
+            onClick: $event => (removeSelect(i))
+          }, {
+            default: withCtx(() => _cache[0] || (_cache[0] = [
+              createTextVNode("Remove this selector")
+            ])),
+            _: 2 /* DYNAMIC */,
+            __: [0]
+          }, 1032 /* PROPS, DYNAMIC_SLOTS */, ["onClick"])
+        ]))
+      }), 128 /* KEYED_FRAGMENT */))
+    ]),
+    createElementVNode("div", _hoisted_2, [
+      createVNode(_component_VButton, {
+        xLarge: "",
+        fullWidth: "",
+        onClick: addSelect
+      }, {
+        default: withCtx(() => _cache[1] || (_cache[1] = [
+          createTextVNode("Add")
+        ])),
+        _: 1 /* STABLE */,
+        __: [1]
+      })
+    ])
+  ]))
 }
 }
 
 };
-var Module = /*#__PURE__*/_export_sfc(_sfc_main, [['__scopeId',"data-v-cd59a7ea"],['__file',"module.vue"]]);
+var Module = /*#__PURE__*/_export_sfc(_sfc_main, [['__scopeId',"data-v-b66b7c0e"],['__file',"module.vue"]]);
 
 var index = {
   id: 'composite-uniqueness-config',

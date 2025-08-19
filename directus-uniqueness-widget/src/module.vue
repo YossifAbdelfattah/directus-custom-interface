@@ -1,95 +1,119 @@
 <template>
-  <v-select
-    v-model="selected"
-    :items="fields"
-    multiple
-    label="Rules"
-    item-text="field"
-    item-value="field"
-    class="selected-list"
-  />
+  <div>
+    <div class="wrapper">
+      <div v-for="(_model, i) in selects" :key="i" class="container">
+        <VSelect
+          v-model="selects[i]"
+          :items="fields"
+          multiple
+          :multiplePreviewThreshold="5"
+          class="selected-list"
+        />
+        <VButton
+          xLarge
+          danger
+          @click="removeSelect(i)"
+        >Remove this selector</VButton>
+      </div>
+    </div>
+    <div class="add-button-container">
+      <VButton xLarge fullWidth @click="addSelect">Add</VButton>
+    </div>
+  </div>
 </template>
 
 <script setup>
-import { inject, ref, computed, watch, watchEffect, onMounted } from 'vue';
-import { useCollection, useStores } from '@directus/extensions-sdk';
+import { inject, ref, watch, computed } from 'vue';
+import { useCollection } from '@directus/extensions-sdk';
 
 const props = defineProps({
-  // Directus passes this field value; on new items it's often null
-  value: { type: Array, default: null },
+  collectionField: { type: String, default: null },
+  collectionName: { type: String, default: null },
+  // Persisted value can be string[] (legacy) or string[][] (groups). We emit string[][].
+  value: { type: Array, default: () => [] },
+  record: { type: Object, default: () => ({}) },
+  collection: { type: String, default: null },
+  type: { type: String, default: null },
 });
-console.log('----------------------------------------');
-console.log('Props:', props.value);
-const emit = defineEmits(['update:modelValue', 'input']);
 
-// Current item values from Directus Item Editor
+const emit = defineEmits(['input']);
 const values = inject('values', ref({}));
-console.log('----------------------------------------');
-console.log('Current item values:', values.value);
-console.log('----------------------------------------');
 
-/**
- * Keep your local "selected", but wire it to the Directus form store.
- * - Getter normalizes null -> []
- * - Setter emits update:modelValue (and input for legacy)
- */
-const selected = computed({
-  get: () => (Array.isArray(props.value) ? props.value : []),
-  set: (v) => {
-    const arr = Array.isArray(v) ? v : [];
-    emit('input', arr);
+const chosenCollection = computed(() =>
+  values.value?.[props.collectionField] ||
+  props.collectionName ||
+  values.value?.collection ||
+  props.collection
+);
+
+const fields = ref([]); // ['title','status', ...]
+
+// --- hydrate groups from props.value ---
+function toGroups(val) {
+  if (Array.isArray(val) && val.every(Array.isArray)) {
+    return val.map((g) => g.slice()); // already string[][]
+  }
+  if (Array.isArray(val)) {
+    return [val.slice()]; // legacy string[]
+  }
+  return [[]];
+}
+
+const selects = ref(toGroups(props.value));
+if (selects.value.length === 0) selects.value.push([]);
+
+// --- emit groups verbatim (cleaned) ---
+watch(
+  selects,
+  (groups) => {
+    const cleaned = groups.map((g) =>
+      (Array.isArray(g) ? g : []).filter((x) => typeof x === 'string' && x.length > 0)
+    );
+    emit('input', cleaned);
   },
-});
-console.log('selected value:', selected.value);
-console.log('----------------------------------------');
-// On create, coerce null -> [] so "required" doesn't fail with null
-onMounted(() => {
-  if (props.value == null) selected.value = [];
-});
+  { deep: true, immediate: true }
+);
 
-// Determine the chosen collection name
-const chosenCollection = computed(() => {
-  const raw = values.value?.collection ?? '';
-  return typeof raw === 'string' ? raw.trim() : '';
-});
+function addSelect() {
+  selects.value.push([]);
+}
+function removeSelect(index) {
+  console.log(index);
+  selects.value.splice(index, 1);
+  if (selects.value.length === 0) selects.value.push([]);
+}
 
-// Validate against admin store to avoid "stores could not be found"
-const { useCollectionsStore } = useStores();
-const collectionsStore = useCollectionsStore();
-
-const validName = computed(() => {
-  const n = chosenCollection.value;
-  return n && collectionsStore.collections?.some(c => c.collection === n) ? n : null;
-});
-
-// Bind once; pass reactive ref (validName)
-const { fields: rawFields } = useCollection(validName);
-
-// Visible fields (exclude hidden)
-const fields = ref([]);
-
-watchEffect(() => {
-  if (!validName.value) {
-    fields.value = [];
-    return;
-  }
-  fields.value = (rawFields.value || []).filter(f => !f?.meta?.hidden);
-});
-
-// Clear selection when collection becomes invalid
-watch(validName, (n) => {
-  if (!n) {
-    selected.value = []; // clears v-select and writes [] to form state
-  }
-});
+// load visible (non-hidden) fields for the chosen collection
+watch(
+  chosenCollection,
+  async (name) => {
+    if (!name) return;
+    try {
+      const { fields: collectionFields } = useCollection(name);
+      fields.value = collectionFields.value
+        .filter((f) => !f?.meta?.hidden)
+        .map((f) => f.field);
+    } catch (err) {
+      console.error('Failed to load fields for collection', name, err);
+      fields.value = [];
+    }
+  },
+  { immediate: true }
+);
 </script>
 
 
 <style scoped>
 .selected-list {
-  margin-top: 1rem;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
+  margin-top: 0rem;
 }
+.container {
+  display: flex;
+  gap: 5rem;
+  margin-bottom: 1rem;
+}
+.add-button-container {
+  margin-top: 0rem;
+}
+
 </style>
