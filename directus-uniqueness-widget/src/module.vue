@@ -1,21 +1,14 @@
 <template>
   <div>
-    <div class="wrapper">
-      <div v-for="(_model, i) in selects" :key="i" class="container">
-        <VSelect
-          v-model="selects[i]"
-          :items="fields"
-          multiple
-          :multiplePreviewThreshold="5"
-          class="selected-list"
-        />
-        <VButton
-          xLarge
-          danger
-          @click="removeSelect(i)"
-        >Remove this selector</VButton>
+    <!-- Only render the selectors when there is at least one group -->
+    <div v-if="fieldGroups.length" class="wrapper">
+      <div v-for="(_model, i) in fieldGroups" :key="i" class="container">
+        <VSelect v-model="fieldGroups[i]" :items="fields" placeholder="Select Your Fields" multiple :multiplePreviewThreshold="5"
+          class="selected-list" />
+        <VButton xLarge danger @click="removeSelect(i)">Remove this selector</VButton>
       </div>
     </div>
+
     <div class="add-button-container">
       <VButton xLarge fullWidth @click="addSelect">Add</VButton>
     </div>
@@ -24,96 +17,77 @@
 
 <script setup>
 import { inject, ref, watch, computed } from 'vue';
-import { useCollection } from '@directus/extensions-sdk';
+import { useCollection } from '@wbce-d9/extensions-sdk';
 
 const props = defineProps({
-  collectionField: { type: String, default: null },
-  collectionName: { type: String, default: null },
-  // Persisted value can be string[] (legacy) or string[][] (groups). We emit string[][].
-  value: { type: Array, default: () => [] },
-  record: { type: Object, default: () => ({}) },
-  collection: { type: String, default: null },
-  type: { type: String, default: null },
+  value: { type: Array, default: () => [] }, // string[][]
 });
 
 const emit = defineEmits(['input']);
 const values = inject('values', ref({}));
 
-const chosenCollection = computed(() =>
-  values.value?.[props.collectionField] ||
-  props.collectionName ||
-  values.value?.collection ||
-  props.collection
+// Which collection to read fields from
+const chosenCollection = computed(() => values.value?.collection);
+
+// All available fields in the chosen collection
+const fields = ref([]);
+
+// Start with saved groups if present; otherwise start with no rows (only "Add" visible)
+const fieldGroups = ref(
+  Array.isArray(props.value) && props.value.length ? props.value.map((g) => g.slice()) : []
 );
 
-const fields = ref([]); // ['title','status', ...]
-
-// --- hydrate groups from props.value ---
-function toGroups(val) {
-  if (Array.isArray(val) && val.every(Array.isArray)) {
-    return val.map((g) => g.slice()); // already string[][]
-  }
-  if (Array.isArray(val)) {
-    return [val.slice()]; // legacy string[]
-  }
-  return [[]];
-}
-
-const selects = ref(toGroups(props.value));
-if (selects.value.length === 0) selects.value.push([]);
-
-// --- emit groups verbatim (cleaned) ---
+// Emit only non-empty groups; [] when nothing selected
 watch(
-  selects,
-  (groups) => {
-    const cleaned = groups.map((g) =>
-      (Array.isArray(g) ? g : []).filter((x) => typeof x === 'string' && x.length > 0)
-    );
-    emit('input', cleaned);
+  fieldGroups,
+  () => {
+    const groupsToPersist = fieldGroups.value
+      .filter((group) => group.length)
+      .map((group) => [...group]);
+    emit('input', groupsToPersist);
   },
   { deep: true, immediate: true }
 );
 
-function addSelect() {
-  selects.value.push([]);
-}
-function removeSelect(index) {
-  console.log(index);
-  selects.value.splice(index, 1);
-  if (selects.value.length === 0) selects.value.push([]);
-}
-
-// load visible (non-hidden) fields for the chosen collection
+// Load visible (non-hidden) fields whenever the target collection changes
 watch(
   chosenCollection,
-  async (name) => {
-    if (!name) return;
-    try {
-      const { fields: collectionFields } = useCollection(name);
-      fields.value = collectionFields.value
-        .filter((f) => !f?.meta?.hidden)
-        .map((f) => f.field);
-    } catch (err) {
-      console.error('Failed to load fields for collection', name, err);
+  (name) => {
+    if (!name) {
       fields.value = [];
+      return;
     }
+    const { fields: collectionFields } = useCollection(name);
+    fields.value = collectionFields.value
+      .filter((f) => !f?.meta?.hidden)
+      .map((f) => f.field);
   },
   { immediate: true }
 );
-</script>
 
+// Add a new empty selector row (reveals the VSelect + Remove UI)
+function addSelect() {
+  fieldGroups.value.push([]);
+}
+
+// Remove a selector row; do NOT re-add an empty row when none remain
+function removeSelect(index) {
+  fieldGroups.value.splice(index, 1);
+}
+</script>
 
 <style scoped>
 .selected-list {
   margin-top: 0rem;
 }
+
 .container {
   display: flex;
   gap: 5rem;
   margin-bottom: 1rem;
 }
+
 .add-button-container {
   margin-top: 0rem;
 }
-
 </style>

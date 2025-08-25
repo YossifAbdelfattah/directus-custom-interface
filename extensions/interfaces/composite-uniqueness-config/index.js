@@ -1,33 +1,17 @@
-import { inject, ref, computed, watch, resolveComponent, openBlock, createElementBlock, createElementVNode, Fragment, renderList, createVNode, withCtx, createTextVNode } from 'vue';
-import { useCollection } from '@directus/extensions-sdk';
+import { inject, ref, computed, watch, resolveComponent, openBlock, createElementBlock, createCommentVNode, Fragment, renderList, createVNode, withCtx, createTextVNode, createElementVNode } from 'vue';
+import { useCollection } from '@wbce-d9/extensions-sdk';
 
-var e=[],t=[];function n(n,r){if(n&&"undefined"!=typeof document){var a,s=!0===r.prepend?"prepend":"append",d=!0===r.singleTag,i="string"==typeof r.container?document.querySelector(r.container):document.getElementsByTagName("head")[0];if(d){var u=e.indexOf(i);-1===u&&(u=e.push(i)-1,t[u]={}),a=t[u]&&t[u][s]?t[u][s]:t[u][s]=c();}else a=c();65279===n.charCodeAt(0)&&(n=n.substring(1)),a.styleSheet?a.styleSheet.cssText+=n:a.appendChild(document.createTextNode(n));}function c(){var e=document.createElement("style");if(e.setAttribute("type","text/css"),r.attributes)for(var t=Object.keys(r.attributes),n=0;n<t.length;n++)e.setAttribute(t[n],r.attributes[t[n]]);var a="prepend"===s?"afterbegin":"beforeend";return i.insertAdjacentElement(a,e),e}}
-
-var css = "\n.selected-list[data-v-b66b7c0e] {\n  margin-top: 0rem;\n}\n.container[data-v-b66b7c0e] {\n  display: flex;\n  gap: 5rem;\n  margin-bottom: 1rem;\n}\n.add-button-container[data-v-b66b7c0e] {\n  margin-top: 0rem;\n}\n\n";
-n(css,{});
-
-var _export_sfc = (sfc, props) => {
-  const target = sfc.__vccOpts || sfc;
-  for (const [key, val] of props) {
-    target[key] = val;
-  }
-  return target;
+const _hoisted_1 = {
+  key: 0,
+  class: "wrapper"
 };
-
-const _hoisted_1 = { class: "wrapper" };
 const _hoisted_2 = { class: "add-button-container" };
 
 
-const _sfc_main = {
+var script = {
   __name: 'module',
   props: {
-  collectionField: { type: String, default: null },
-  collectionName: { type: String, default: null },
-  // Persisted value can be string[] (legacy) or string[][] (groups). We emit string[][].
-  value: { type: Array, default: () => [] },
-  record: { type: Object, default: () => ({}) },
-  collection: { type: String, default: null },
-  type: { type: String, default: null },
+  value: { type: Array, default: () => [] }, // string[][]
 },
   emits: ['input'],
   setup(__props, { emit: __emit }) {
@@ -37,101 +21,92 @@ const props = __props;
 const emit = __emit;
 const values = inject('values', ref({}));
 
-const chosenCollection = computed(() =>
-  values.value?.[props.collectionField] ||
-  props.collectionName ||
-  values.value?.collection ||
-  props.collection
+// Which collection to read fields from
+const chosenCollection = computed(() => values.value?.collection);
+
+// All available fields in the chosen collection
+const fields = ref([]);
+
+// Start with saved groups if present; otherwise start with no rows (only "Add" visible)
+const fieldGroups = ref(
+  Array.isArray(props.value) && props.value.length ? props.value.map((g) => g.slice()) : []
 );
 
-const fields = ref([]); // ['title','status', ...]
-
-// --- hydrate groups from props.value ---
-function toGroups(val) {
-  if (Array.isArray(val) && val.every(Array.isArray)) {
-    return val.map((g) => g.slice()); // already string[][]
-  }
-  if (Array.isArray(val)) {
-    return [val.slice()]; // legacy string[]
-  }
-  return [[]];
-}
-
-const selects = ref(toGroups(props.value));
-if (selects.value.length === 0) selects.value.push([]);
-
-// --- emit groups verbatim (cleaned) ---
+// Emit only non-empty groups; [] when nothing selected
 watch(
-  selects,
-  (groups) => {
-    const cleaned = groups.map((g) =>
-      (Array.isArray(g) ? g : []).filter((x) => typeof x === 'string' && x.length > 0)
-    );
-    emit('input', cleaned);
+  fieldGroups,
+  () => {
+    const groupsToPersist = fieldGroups.value
+      .filter((group) => group.length)
+      .map((group) => [...group]);
+    emit('input', groupsToPersist);
   },
   { deep: true, immediate: true }
 );
 
-function addSelect() {
-  selects.value.push([]);
-}
-function removeSelect(index) {
-  console.log(index);
-  selects.value.splice(index, 1);
-  if (selects.value.length === 0) selects.value.push([]);
-}
-
-// load visible (non-hidden) fields for the chosen collection
+// Load visible (non-hidden) fields whenever the target collection changes
 watch(
   chosenCollection,
-  async (name) => {
-    if (!name) return;
-    try {
-      const { fields: collectionFields } = useCollection(name);
-      fields.value = collectionFields.value
-        .filter((f) => !f?.meta?.hidden)
-        .map((f) => f.field);
-    } catch (err) {
-      console.error('Failed to load fields for collection', name, err);
+  (name) => {
+    if (!name) {
       fields.value = [];
+      return;
     }
+    const { fields: collectionFields } = useCollection(name);
+    fields.value = collectionFields.value
+      .filter((f) => !f?.meta?.hidden)
+      .map((f) => f.field);
   },
   { immediate: true }
 );
+
+// Add a new empty selector row (reveals the VSelect + Remove UI)
+function addSelect() {
+  fieldGroups.value.push([]);
+}
+
+// Remove a selector row; do NOT re-add an empty row when none remain
+function removeSelect(index) {
+  fieldGroups.value.splice(index, 1);
+}
 
 return (_ctx, _cache) => {
   const _component_VSelect = resolveComponent("VSelect");
   const _component_VButton = resolveComponent("VButton");
 
   return (openBlock(), createElementBlock("div", null, [
-    createElementVNode("div", _hoisted_1, [
-      (openBlock(true), createElementBlock(Fragment, null, renderList(selects.value, (_model, i) => {
-        return (openBlock(), createElementBlock("div", {
-          key: i,
-          class: "container"
-        }, [
-          createVNode(_component_VSelect, {
-            modelValue: selects.value[i],
-            "onUpdate:modelValue": $event => ((selects.value[i]) = $event),
-            items: fields.value,
-            multiple: "",
-            multiplePreviewThreshold: 5,
-            class: "selected-list"
-          }, null, 8 /* PROPS */, ["modelValue", "onUpdate:modelValue", "items"]),
-          createVNode(_component_VButton, {
-            xLarge: "",
-            danger: "",
-            onClick: $event => (removeSelect(i))
-          }, {
-            default: withCtx(() => _cache[0] || (_cache[0] = [
-              createTextVNode("Remove this selector")
-            ])),
-            _: 2 /* DYNAMIC */,
-            __: [0]
-          }, 1032 /* PROPS, DYNAMIC_SLOTS */, ["onClick"])
+    createCommentVNode(" Only render the selectors when there is at least one group "),
+    (fieldGroups.value.length)
+      ? (openBlock(), createElementBlock("div", _hoisted_1, [
+          (openBlock(true), createElementBlock(Fragment, null, renderList(fieldGroups.value, (_model, i) => {
+            return (openBlock(), createElementBlock("div", {
+              key: i,
+              class: "container"
+            }, [
+              createVNode(_component_VSelect, {
+                modelValue: fieldGroups.value[i],
+                "onUpdate:modelValue": $event => ((fieldGroups.value[i]) = $event),
+                items: fields.value,
+                placeholder: "Select Your Fields",
+                multiple: "",
+                multiplePreviewThreshold: 5,
+                class: "selected-list"
+              }, null, 8 /* PROPS */, ["modelValue", "onUpdate:modelValue", "items"]),
+              createVNode(_component_VButton, {
+                xLarge: "",
+                danger: "",
+                onClick: $event => (removeSelect(i))
+              }, {
+                default: withCtx(() => [...(_cache[0] || (_cache[0] = [
+                  createTextVNode("Remove this selector")
+                ]))]),
+                _: 2 /* DYNAMIC */,
+                __: [0]
+              }, 1032 /* PROPS, DYNAMIC_SLOTS */, ["onClick"])
+            ]))
+          }), 128 /* KEYED_FRAGMENT */))
         ]))
-      }), 128 /* KEYED_FRAGMENT */))
-    ]),
+      : createCommentVNode("v-if", true),
     createElementVNode("div", _hoisted_2, [
       createVNode(_component_VButton, {
         xLarge: "",
@@ -150,7 +125,14 @@ return (_ctx, _cache) => {
 }
 
 };
-var Module = /*#__PURE__*/_export_sfc(_sfc_main, [['__scopeId',"data-v-b66b7c0e"],['__file',"module.vue"]]);
+
+var e=[],t=[];function n(n,r){if(n&&"undefined"!=typeof document){var a,s=!0===r.prepend?"prepend":"append",d=!0===r.singleTag,i="string"==typeof r.container?document.querySelector(r.container):document.getElementsByTagName("head")[0];if(d){var u=e.indexOf(i);-1===u&&(u=e.push(i)-1,t[u]={}),a=t[u]&&t[u][s]?t[u][s]:t[u][s]=c();}else a=c();65279===n.charCodeAt(0)&&(n=n.substring(1)),a.styleSheet?a.styleSheet.cssText+=n:a.appendChild(document.createTextNode(n));}function c(){var e=document.createElement("style");if(e.setAttribute("type","text/css"),r.attributes)for(var t=Object.keys(r.attributes),n=0;n<t.length;n++)e.setAttribute(t[n],r.attributes[t[n]]);var a="prepend"===s?"afterbegin":"beforeend";return i.insertAdjacentElement(a,e),e}}
+
+var css = "\n.selected-list[data-v-b52a34f6] {\n  margin-top: 0rem;\n}\n.container[data-v-b52a34f6] {\n  display: flex;\n  gap: 5rem;\n  margin-bottom: 1rem;\n}\n.add-button-container[data-v-b52a34f6] {\n  margin-top: 0rem;\n}\n";
+n(css,{});
+
+script.__scopeId = "data-v-b52a34f6";
+script.__file = "src/module.vue";
 
 var index = {
   id: 'composite-uniqueness-config',
@@ -159,7 +141,7 @@ var index = {
   description: 'Select fields that must be unique in combination',
   types: ['json'],
   group: 'standard',
-  component: Module
+  component: script
 };
 
 export { index as default };
