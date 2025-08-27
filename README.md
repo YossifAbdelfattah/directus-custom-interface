@@ -57,7 +57,6 @@ Notes on versions:
 
 - Docker image: `ghcr.io/directus/directus:9.26.0`
 - Interface dev SDK: `@wbce-d9/extensions-sdk`
-- If you change the Directus image version, ensure the interface SDK/host compatibility matches to avoid runtime issues in the Admin App.
 
 **HINT**
 For our case, in local development you should use '@directus/extensions-sdk' instead. Once done with local testing, use the community package '@wbce-d9/extensions-sdk' and rebuild the interface then copy it to the infrastructure repo.

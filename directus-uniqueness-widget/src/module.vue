@@ -17,6 +17,10 @@
 
 <script setup>
 import { inject, ref, watch, computed } from 'vue';
+// Use this package for local development only
+// import { useCollection } from '@directus/extensions-sdk';
+
+// Use community package when building for stage/prod
 import { useCollection } from '@wbce-d9/extensions-sdk';
 
 const props = defineProps({
