@@ -53,11 +53,6 @@ npm run build
 
 The build script compiles to `directus-uniqueness-widget/dist/index.js` and copies it to `extensions/interfaces/composite-uniqueness-config/index.js`.
 
-Notes on versions:
-
-- Docker image: `ghcr.io/directus/directus:9.26.0`
-- Interface dev SDK: `@wbce-d9/extensions-sdk`
-
 **HINT**
-For our case, in local development you should use '@directus/extensions-sdk' instead. Once done with local testing, use the community package '@wbce-d9/extensions-sdk' and rebuild the interface then copy it to the infrastructure repo.
+For our case, in local development you should use '@directus/extensions-sdk' instead of '@wbce-d9/extensions-sdk'. Once done with local testing, use the community package '@wbce-d9/extensions-sdk' and rebuild the interface then copy it to the infrastructure repo.
 
